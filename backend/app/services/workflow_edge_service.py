@@ -6,6 +6,8 @@ from app.models.user import User
 from app.models.workflow_edge import WorkflowEdge
 from app.repositories.workflow_edge_repository import WorkflowEdgeRepository
 from app.repositories.workflow_node_repository import WorkflowNodeRepository
+from app.repositories.workflow_repository import WorkflowRepository
+from app.repositories.workspace_repository import WorkspaceRepository
 from app.schemas.workflow_edge import WorkflowEdgeCreate
 
 
@@ -13,6 +15,8 @@ class WorkflowEdgeService:
     def __init__(self, session: AsyncSession) -> None:
         self.edge_repository = WorkflowEdgeRepository(session)
         self.node_repository = WorkflowNodeRepository(session)
+        self.workspace_repository=WorkspaceRepository(session)
+        self.workflow_repository=WorkflowRepository(session)
 
     async def create(
         self,
@@ -20,6 +24,19 @@ class WorkflowEdgeService:
         workflow_id: UUID,
         current_user: User,
     ) -> WorkflowEdge | None:
+
+        workflow=await self.workflow_repository.get_by_id(workflow_id)
+
+        if workflow is None:
+            return None
+        
+        workspace=await self.workspace_repository.get_by_id(workflow.workspace_id)
+
+        if workspace is None:
+            return None 
+        
+        if workspace.user_id!=current_user.id:
+            raise PermissionError("You're not authorised")
 
         source_node = await self.node_repository.get_by_id(
             data.source_node_id
@@ -53,7 +70,23 @@ class WorkflowEdgeService:
         self,
         workflow_id: UUID,
         current_user: User,
-    ) -> list[WorkflowEdge]:
+    ) -> list[WorkflowEdge]|None:
+
+        workflow=await self.workflow_repository.get_by_id(workflow_id)
+
+        if workflow is None:
+            return None
+        
+        workspace=await self.workspace_repository.get_by_id(workflow.workspace_id)
+
+        if workspace is None:
+            return None 
+        
+        if workspace.user_id!=current_user.id:
+            raise PermissionError("You're not authorised")
+
+
+
         return await self.edge_repository.get_by_workflow_id(
             workflow_id
         )

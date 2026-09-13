@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 from jose import jwt
-
+from uuid import uuid4
 from app.core.config import settings
 from app.core.jwt import create_access_token
 from app.dependencies.auth import get_current_user
@@ -13,9 +13,11 @@ async def test_valid_token_returns_user(db_session):
     from app.models.user import User
     from app.repositories.user_repository import UserRepository
 
+    unique_id = uuid4().hex
+
     user = User(
-        email="dependency@example.com",
-        username="dependencyuser",
+        email=f"dependency-{unique_id}@example.com",
+        username=f"dependencyuser-{unique_id}",
         hashed_password="not-a-real-password-hash",
     )
 

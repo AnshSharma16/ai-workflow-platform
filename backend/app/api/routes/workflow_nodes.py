@@ -32,11 +32,18 @@ async def create_node(
 ):
     service = WorkflowNodeService(db)
 
-    node = await service.create(
-        data=data,
-        workflow_id=workflow_id,
-        current_user=current_user,
+    try:
+        node = await service.create(
+            data=data,
+            workflow_id=workflow_id,
+            current_user=current_user,
+        )
+    except PermissionError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorised",
     )
+    
 
     if node is None:
         raise HTTPException(
@@ -60,9 +67,15 @@ async def list_nodes(
 ):
     service = WorkflowNodeService(db)
 
-    nodes = await service.list_for_workflow(
-        workflow_id=workflow_id,
-        current_user=current_user,
+    try:
+        nodes = await service.list_for_workflow(
+            workflow_id=workflow_id,
+            current_user=current_user,
+        )
+    except PermissionError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorised",
     )
 
     if nodes is None:

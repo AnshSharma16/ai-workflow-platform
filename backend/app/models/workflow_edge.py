@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey,String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -24,4 +24,9 @@ class WorkflowEdge(Base, UUIDMixin, TimestampMixin):
         ForeignKey("workflow_nodes.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+
+    branch: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
     )

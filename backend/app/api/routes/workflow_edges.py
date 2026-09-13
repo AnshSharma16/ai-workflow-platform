@@ -32,10 +32,17 @@ async def create_edge(
 ):
     service = WorkflowEdgeService(db)
 
-    edge = await service.create(
-        data=data,
-        workflow_id=workflow_id,
-        current_user=current_user,
+    try:
+        edge = await service.create(
+            data=data,
+            workflow_id=workflow_id,
+            current_user=current_user,
+        )
+
+    except PermissionError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorised",
     )
 
     if edge is None:
@@ -58,9 +65,23 @@ async def list_edges(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = WorkflowEdgeService(db)
 
-    return await service.list_for_workflow(
-        workflow_id=workflow_id,
-        current_user=current_user,
+    service = WorkflowEdgeService(db)
+    try:
+        edges = await service.list_for_workflow(
+            workflow_id=workflow_id,
+            current_user=current_user,
+        )
+    except PermissionError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorised",
     )
+
+    if edges is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found",
+        )
+
+    return edges

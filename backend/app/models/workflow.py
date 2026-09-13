@@ -18,7 +18,7 @@ class Workflow(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
 
-    workspace_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
