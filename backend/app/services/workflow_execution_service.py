@@ -1,6 +1,8 @@
 from uuid import UUID
+import asyncio
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.database.session import AsyncSessionLocal
 
 from app.models.node_execution import (
     NodeExecution,
@@ -31,10 +33,19 @@ from app.repositories.workspace_repository import (
 )
 from app.services.graph_validator import GraphValidator
 from app.services.node_executor import NodeExecutor
+from app.services.retry_manager import RetryManager
 
+async def run_workflow_in_background(
+    execution_id: UUID,
+) -> None:
+    async with AsyncSessionLocal() as db:
+        service = WorkflowExecutionService(db)
+        await service._execute_workflow(execution_id)
 
 class WorkflowExecutionService:
     def __init__(self, session: AsyncSession) -> None:
+        
+        
         self.workspace_repository = WorkspaceRepository(session)
         self.workflow_repository = WorkflowRepository(session)
         self.node_repository = WorkflowNodeRepository(session)
@@ -43,6 +54,7 @@ class WorkflowExecutionService:
         self.node_execution_repository = NodeExecutionRepository(session)
         self.graph_validator = GraphValidator()
         self.node_executor = NodeExecutor()
+        self.retry_manager=RetryManager()
 
     async def start_execution(
         self,
@@ -86,12 +98,41 @@ class WorkflowExecutionService:
 
         execution = WorkflowExecution(
             workflow_id=workflow_id,
-            status=ExecutionStatus.RUNNING,
+            status=ExecutionStatus.PENDING,
             input_data=input_data,
         )
 
         execution = await self.execution_repository.create(
             execution
+        )
+
+        return execution
+
+    async def _execute_workflow(
+        self,
+        execution_id: UUID,        
+    ) -> None:
+
+        execution = await self.execution_repository.get_by_id(
+        execution_id
+    )
+
+        if execution is None:
+            return
+
+        nodes = await self.node_repository.get_by_workflow_id(
+            execution.workflow_id
+        )
+
+        edges = await self.edge_repository.get_by_workflow_id(
+            execution.workflow_id
+        )
+
+        execution.status = ExecutionStatus.RUNNING
+
+        await self.execution_repository.update_status(
+            execution,
+            ExecutionStatus.RUNNING,
         )
 
         try:
@@ -112,7 +153,7 @@ class WorkflowExecutionService:
                 )
 
             current_node = start_nodes[0]
-            current_data = input_data or {}
+            current_data = execution.input_data or {}
 
             while current_node:
 
@@ -121,7 +162,7 @@ class WorkflowExecutionService:
                 node_execution = NodeExecution(
                     execution_id=execution.id,
                     node_id=current_node.id,
-                    status=NodeExecutionStatus.RUNNING,
+                    status=NodeExecutionStatus.PENDING,
                     input_data=node_input,
                 )
 
@@ -131,25 +172,45 @@ class WorkflowExecutionService:
                     )
                 )
 
-                try:
-                    output_data = await self.node_executor.execute(
-                        current_node,
-                        node_input,
-                    )
+                await self.node_execution_repository.update_status(
+                    node_execution,
+                    NodeExecutionStatus.RUNNING,
+                )
 
-                    await self.node_execution_repository.update_status(
-                        node_execution,
-                        NodeExecutionStatus.SUCCESS,
-                        output_data=output_data,
-                    )
+                attempt =1 
 
-                except Exception as exc:
-                    await self.node_execution_repository.update_status(
-                        node_execution,
-                        NodeExecutionStatus.FAILED,
-                        error_message=str(exc),
-                    )
-                    raise
+                while True:
+
+                    try:
+                        output_data = await self.node_executor.execute(
+                            current_node,
+                            node_input,
+                        )
+
+                        await self.node_execution_repository.update_status(
+                            node_execution,
+                            NodeExecutionStatus.SUCCESS,
+                            output_data=output_data,
+                        )
+
+                        break
+
+                    except Exception as exc:
+                        if self.retry_manager.should_retry(attempt):
+                            delay=self.retry_manager.get_delay(attempt)
+                            await asyncio.sleep(delay)
+                            attempt+=1
+                            node_execution.attempt=attempt
+                            continue
+
+
+                        
+                        await self.node_execution_repository.update_status(
+                            node_execution,
+                            NodeExecutionStatus.FAILED,
+                            error_message=str(exc),
+                        )
+                        raise
 
                 outgoing_edges = [
                     edge
@@ -216,7 +277,8 @@ class WorkflowExecutionService:
             execution.error_message,
         )
 
-        return execution
+        return None
+
 
     async def list_for_workflow(
         self,
@@ -267,3 +329,31 @@ class WorkflowExecutionService:
 
         return execution
 
+
+    async def list_node_executions(
+    self,
+    execution_id: UUID,
+    current_user: User,
+) -> list[NodeExecution] | None:
+
+        execution=await self.execution_repository.get_by_id(execution_id)
+
+        if execution is None:
+            return None
+        
+        workflow=await self.workflow_repository.get_by_id(execution.workflow_id)
+
+        if workflow is None:
+            return None 
+        
+        workspace=await self.workspace_repository.get_by_id(workflow.workspace_id)
+
+        if workspace is None:
+            return None 
+        
+        if workspace.user_id!=current_user.id:
+            raise PermissionError("You're not authorised")
+
+        return await self.node_execution_repository.get_by_execution_id(
+            execution_id
+        )

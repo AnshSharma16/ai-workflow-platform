@@ -9,6 +9,7 @@ from app.database.mixins import TimestampMixin, UUIDMixin
 
 
 class NodeExecutionStatus(str, enum.Enum):
+    PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
@@ -38,6 +39,11 @@ class NodeExecution(Base, UUIDMixin, TimestampMixin):
     status: Mapped[NodeExecutionStatus] = mapped_column(
         Enum(NodeExecutionStatus),
         default=NodeExecutionStatus.RUNNING,
+        nullable=False,
+    )
+
+    attempt: Mapped[int] = mapped_column(
+        default=1,
         nullable=False,
     )
 

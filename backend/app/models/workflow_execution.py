@@ -2,7 +2,7 @@ import enum
 
 from sqlalchemy import Enum, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
-
+from uuid import UUID
 from app.database.base import Base
 from app.database.mixins import TimestampMixin, UUIDMixin
 

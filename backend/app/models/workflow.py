@@ -3,6 +3,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
 from app.database.mixins import TimestampMixin, UUIDMixin
+from uuid import UUID
 
 
 class Workflow(Base, UUIDMixin, TimestampMixin):
