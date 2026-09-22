@@ -46,7 +46,6 @@ class WorkflowExecutionRepository:
         execution.error_message = error_message
 
         await self.session.flush()
-        await self.session.refresh(execution)
 
         return execution
 

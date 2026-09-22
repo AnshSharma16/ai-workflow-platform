@@ -120,6 +120,9 @@ class WorkflowExecutionService:
         if execution is None:
             return
 
+        if execution.status != ExecutionStatus.PENDING:
+            return
+
         nodes = await self.node_repository.get_by_workflow_id(
             execution.workflow_id
         )
