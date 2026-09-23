@@ -513,3 +513,196 @@ async def test_lists_node_executions(db_session):
 
     assert node_executions[0].node_id == node1.id
     assert node_executions[1].node_id == node2.id
+
+@pytest.mark.asyncio
+async def test_node_retries_then_succeeds(
+    db_session,
+    monkeypatch,
+):
+    user = User(
+        email=f"user-{uuid4().hex}@example.com",
+        username=f"user-{uuid4().hex}",
+        hashed_password="test",
+    )
+
+    db_session.add(user)
+    await db_session.flush()
+
+    workspace = Workspace(
+        name="Retry Test Workspace",
+        user_id=user.id,
+    )
+
+    db_session.add(workspace)
+    await db_session.flush()
+
+    workflow = Workflow(
+        name="Retry Workflow",
+        workspace_id=workspace.id,
+    )
+
+    db_session.add(workflow)
+    await db_session.flush()
+
+    webhook_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type="webhook",
+        name="Retry Node",
+        config={},
+    )
+
+    db_session.add(webhook_node)
+    await db_session.flush()
+
+    service = WorkflowExecutionService(db_session)
+
+    attempts = 0
+
+    async def fake_execute(node, input_data):
+        nonlocal attempts
+
+        attempts += 1
+
+        if attempts < 3:
+            raise RuntimeError("temporary failure")
+
+        return input_data
+
+    monkeypatch.setattr(
+        service.node_executor,
+        "execute",
+        fake_execute,
+    )
+
+    monkeypatch.setattr(
+        service.retry_manager,
+        "get_delay",
+        lambda attempt: 0,
+    )
+
+    execution = await service.start_execution(
+        workflow.id,
+        user,
+        {"message": "retry test"},
+    )
+
+    assert execution is not None
+    assert execution.status == ExecutionStatus.PENDING
+
+    await service._execute_workflow(execution.id)
+
+    updated_execution = await service.execution_repository.get_by_id(
+        execution.id
+    )
+
+    node_executions = await service.list_node_executions(
+        execution.id,
+        user,
+    )
+
+    assert updated_execution is not None
+    assert updated_execution.status == ExecutionStatus.SUCCESS
+
+    assert len(node_executions) == 1
+
+    node_execution = node_executions[0]
+
+    assert node_execution.status == NodeExecutionStatus.SUCCESS
+    assert node_execution.attempt == 3
+    assert attempts == 3
+
+@pytest.mark.asyncio
+async def test_node_fails_after_max_retries(
+    db_session,
+    monkeypatch,
+):
+    user = User(
+        email=f"user-{uuid4().hex}@example.com",
+        username=f"user-{uuid4().hex}",
+        hashed_password="test",
+    )
+
+    db_session.add(user)
+    await db_session.flush()
+
+    workspace = Workspace(
+        name="Max Retry Test Workspace",
+        user_id=user.id,
+    )
+
+    db_session.add(workspace)
+    await db_session.flush()
+
+    workflow = Workflow(
+        name="Max Retry Workflow",
+        workspace_id=workspace.id,
+    )
+
+    db_session.add(workflow)
+    await db_session.flush()
+
+    webhook_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type="webhook",
+        name="Failing Node",
+        config={},
+    )
+
+    db_session.add(webhook_node)
+    await db_session.flush()
+
+    service = WorkflowExecutionService(db_session)
+
+    attempts = 0
+
+    async def fake_execute(node, input_data):
+        nonlocal attempts
+
+        attempts += 1
+        raise RuntimeError("permanent failure")
+
+    monkeypatch.setattr(
+        service.node_executor,
+        "execute",
+        fake_execute,
+    )
+
+    monkeypatch.setattr(
+        service.retry_manager,
+        "get_delay",
+        lambda attempt: 0,
+    )
+
+    execution = await service.start_execution(
+        workflow.id,
+        user,
+        {"message": "failure test"},
+    )
+
+    assert execution is not None
+    assert execution.status == ExecutionStatus.PENDING
+
+    await service._execute_workflow(execution.id)
+
+    updated_execution = await service.execution_repository.get_by_id(
+        execution.id
+    )
+
+    node_executions = await service.list_node_executions(
+        execution.id,
+        user,
+    )
+
+    assert updated_execution is not None
+    assert updated_execution.status == ExecutionStatus.FAILED
+    assert updated_execution.error_message == "permanent failure"
+
+    assert len(node_executions) == 1
+
+    node_execution = node_executions[0]
+
+    assert node_execution.status == NodeExecutionStatus.FAILED
+    assert node_execution.attempt == 5
+    assert node_execution.error_message == "permanent failure"
+
+    assert attempts == 5
