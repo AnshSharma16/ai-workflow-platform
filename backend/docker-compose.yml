@@ -15,10 +15,28 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_workflow_db"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d ai_workflow_db" ]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  api:
+    build: .
+    container_name: workflow_api
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/ai_workflow_db
+      SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      DEBUG: ${DEBUG:-false}
+
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
