@@ -1,199 +1,504 @@
-# AI Workflow Platform
+# AI Workflow Automation Platform
 
-A production-oriented workflow automation backend inspired by platforms such as n8n, Zapier, and Make.
+A backend workflow automation platform built with FastAPI, PostgreSQL, SQLAlchemy 2.0, and Docker.
 
-The platform allows users to create workflows composed of connected nodes, execute those workflows asynchronously, track execution history, and handle node failures with retry logic.
+The system allows users to create workflows composed of connected nodes, validate workflow graphs, execute workflows asynchronously, track individual node executions, handle retries, and retrieve execution history.
 
-## 🚀 Tech Stack
+## Features
 
-* **Python 3.10**
-* **FastAPI**
-* **PostgreSQL**
-* **SQLAlchemy 2.0 (Async)**
-* **Pydantic v2**
-* **Alembic**
-* **Docker / Docker Compose**
-* **JWT Authentication**
-* **pytest / pytest-asyncio**
+- JWT-based authentication
+- User and workspace management
+- Workspace-based authorization
+- Workflow creation and management
+- Workflow nodes and edges
+- Directed graph validation
+- Conditional branching
+- Webhook node support
+- LLM node support
+- Condition node support
+- Asynchronous workflow execution
+- Background execution
+- Per-node execution tracking
+- Workflow execution history
+- Node execution history
+- Retry handling with exponential backoff and jitter
+- Execution lifecycle protection
+- PostgreSQL persistence
+- SQLAlchemy 2.0 async ORM
+- Alembic database migrations
+- Dockerized API and PostgreSQL
+- Automated tests with pytest
 
-## 🏗️ Architecture
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Language | Python 3.10 |
+| API Framework | FastAPI |
+| Server | Uvicorn |
+| Database | PostgreSQL 16 |
+| ORM | SQLAlchemy 2.0 |
+| Validation | Pydantic v2 |
+| Migrations | Alembic |
+| Authentication | JWT |
+| Testing | pytest / pytest-asyncio |
+| Containerization | Docker / Docker Compose |
+
+## Architecture
 
 The backend follows a layered architecture:
 
 ```text
-Router
-   ↓
-Service
-   ↓
-Repository
-   ↓
+Client
+  │
+  ▼
+FastAPI Router
+  │
+  ▼
+Service Layer
+  │
+  ▼
+Repository Layer
+  │
+  ▼
 PostgreSQL
 ```
 
-External integrations are isolated through an adapter layer.
+Workflow execution uses a separate execution and adapter flow:
 
 ```text
-API Request
-    ↓
-FastAPI Router
-    ↓
-Service Layer
-    ↓
-Repository Layer
-    ↓
-PostgreSQL
-
-Workflow Execution
-    ↓
+Workflow Service
+      │
+      ▼
 Node Executor
-    ↓
+      │
+      ▼
 Adapter Factory
-    ↓
+      │
+      ▼
 Node Adapter
+      │
+      ▼
+External Integration
 ```
 
-## ⚙️ Core Features
+The architecture separates HTTP handling, business logic, database access, workflow execution, and external integrations.
 
-* User authentication with JWT
-* Workspace-based authorization
-* Workflow creation and management
-* Workflow nodes and edges
-* Graph-based workflow execution
-* Conditional branching
-* Background workflow execution
-* Workflow execution history
-* Per-node execution history
-* Execution lifecycle management
-* Retry handling with bounded backoff
-* PostgreSQL persistence
-* Async SQLAlchemy
-* Database migrations with Alembic
-* API documentation through Swagger/OpenAPI
+## Workflow Model
 
-## 🔄 Workflow Execution
-
-A workflow consists of nodes connected through directed edges.
+A workflow is represented as a directed graph containing nodes and edges.
 
 Example:
 
 ```text
-        ┌──────────────┐
-        │ Start/Webhook│
-        └──────┬───────┘
-               │
-               ▼
-        ┌──────────────┐
-        │  Condition   │
-        └──────┬───────┘
-          ┌────┴────┐
-          ▼         ▼
-       ┌──────┐  ┌──────┐
-       │ True │  │False │
-       │ Node │  │ Node │
-       └──────┘  └──────┘
+Trigger
+   │
+   ▼
+Node A
+   │
+   ▼
+Condition
+  ├──────── true ────────► Node B
+  │
+  └──────── false ───────► Node C
 ```
 
-Execution state follows:
+Nodes represent individual units of work.
+
+Edges define the relationship and execution flow between nodes.
+
+Before execution, the workflow graph is validated to ensure that the execution structure is valid.
+
+## Workflow Execution
+
+When a workflow is executed, an execution record is created and individual node executions are tracked separately.
+
+The workflow execution lifecycle is:
 
 ```text
-PENDING → RUNNING → SUCCESS
-                  ↘ FAILED
+PENDING
+   │
+   ▼
+RUNNING
+   │
+   ▼
+SUCCESS
 ```
 
-Completed, failed, or already-running executions cannot be started again.
+Failed executions follow:
 
-## 🔁 Retry Handling
+```text
+PENDING
+   │
+   ▼
+RUNNING
+   │
+   ▼
+FAILED
+```
 
-Node execution supports bounded retry handling for failures.
+Execution lifecycle protection prevents an execution that is already in a terminal or active state from being executed again.
 
-The retry mechanism includes:
+For example, an execution that is already:
 
-* Configurable maximum attempts
-* Exponential backoff
-* Maximum backoff limit
-* Jitter to avoid synchronized retries
-* Per-node execution tracking
-* Persistent failure information
+```text
+RUNNING
+SUCCESS
+FAILED
+```
 
-## 🗄️ Database
+will not be started again by the workflow execution handler.
 
-PostgreSQL stores:
+## Node Execution Tracking
 
-* Users
-* Workspaces
-* Workflows
-* Workflow nodes
-* Workflow edges
-* Workflow executions
-* Node executions
+Each workflow node execution is tracked independently.
+
+Node execution records contain information such as:
+
+- Execution status
+- Attempt count
+- Error information
+- Execution result
+- Associated workflow execution
+- Associated workflow node
+
+This allows individual node execution history to be inspected separately from the overall workflow execution.
+
+## Conditional Branching
+
+Condition nodes can evaluate workflow data and determine which branch should execute.
+
+Example:
+
+```text
+Input
+  │
+  ▼
+Condition
+  │
+  ├── condition = true  ──► Node A
+  │
+  └── condition = false ─► Node B
+```
+
+This allows workflow execution to follow different paths based on runtime data.
+
+## Retry Handling
+
+Node execution supports retry handling through a dedicated retry manager.
+
+Current configuration:
+
+- Maximum attempts: `5`
+- Base delay: `0.5 seconds`
+- Exponential backoff
+- Maximum delay: `30 seconds`
+- Jitter: `±25%`
+
+Example:
+
+```text
+Attempt 1
+   │
+   └── failure
+          │
+          ▼
+Attempt 2
+   │
+   └── failure
+          │
+          ▼
+Attempt 3
+   │
+   └── success
+```
+
+If a node continues to fail after the maximum number of attempts, the node execution is marked as `FAILED` and the workflow execution is also marked as `FAILED`.
+
+## Authentication & Authorization
+
+Protected API endpoints use JWT authentication.
+
+The authentication flow is:
+
+```text
+Request
+   │
+   ▼
+JWT Validation
+   │
+   ▼
+Current User
+   │
+   ▼
+Authorization / Ownership Check
+   │
+   ▼
+Service Layer
+   │
+   ▼
+Repository Layer
+```
+
+Workspace-owned resources are checked against the authenticated user before access is granted.
+
+This prevents users from accessing or executing resources belonging to another user.
+
+Authentication endpoints remain publicly accessible where required for registration and login.
+
+## Project Structure
+
+```text
+ai-workflow-platform/
+│
+├── backend/
+│   │
+│   ├── app/
+│   │   ├── adapters/
+│   │   │   └── ...
+│   │   │
+│   │   ├── core/
+│   │   │   └── ...
+│   │   │
+│   │   ├── dependencies/
+│   │   │   └── ...
+│   │   │
+│   │   ├── models/
+│   │   │   └── ...
+│   │   │
+│   │   ├── repositories/
+│   │   │   └── ...
+│   │   │
+│   │   ├── routes/
+│   │   │   └── ...
+│   │   │
+│   │   ├── schemas/
+│   │   │   └── ...
+│   │   │
+│   │   ├── services/
+│   │   │   └── ...
+│   │   │
+│   │   └── main.py
+│   │
+│   ├── alembic/
+│   │   └── versions/
+│   │
+│   ├── tests/
+│   │   └── ...
+│   │
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   ├── requirements.txt
+│   ├── alembic.ini
+│   └── .env
+│
+└── README.md
+```
+
+## Database
+
+The application uses PostgreSQL as its primary database.
+
+SQLAlchemy 2.0's asynchronous API is used for database access.
 
 Database schema changes are managed through Alembic migrations.
 
-## 🧪 Testing
+The Docker Compose setup contains:
 
-Run the complete test suite:
-
-```bash
-python -m pytest -v
+```text
+API Container
+     │
+     │ PostgreSQL connection
+     ▼
+PostgreSQL Container
 ```
 
-Run workflow execution tests:
+Inside the Docker Compose network, the API connects to PostgreSQL using the database service name rather than `localhost`.
+
+## Running the Application
+
+### Prerequisites
+
+- Docker
+- Docker Compose
+- Git
+
+### Clone the Repository
 
 ```bash
-python -m pytest tests/test_workflow_execution.py -v
+git clone <your-repository-url>
+cd ai-workflow-platform/backend
 ```
 
-## 🐳 Running Locally
+### Environment Variables
 
-Clone the repository:
+Create a `.env` file in the backend directory:
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/ai_workflow_db
+SECRET_KEY=<your-secret-key>
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+DEBUG=true
+```
+
+Do not commit the `.env` file or expose the actual `SECRET_KEY`.
+
+### Start the Application
+
+Build and start the containers:
 
 ```bash
-git clone <repository-url>
-cd ai-workflow-platform
+docker compose up --build
 ```
 
-Start PostgreSQL:
+The API will be available at:
+
+```text
+http://localhost:8000
+```
+
+## API Documentation
+
+FastAPI automatically generates interactive API documentation.
+
+Swagger UI:
+
+```text
+http://localhost:8000/docs
+```
+
+OpenAPI schema:
+
+```text
+http://localhost:8000/openapi.json
+```
+
+The Swagger UI can be used to inspect and interact with the available API endpoints.
+
+## Database Migrations
+
+Check the current migration:
 
 ```bash
-docker compose up -d
+alembic current
 ```
 
-Install Python dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Run database migrations:
+Apply all pending migrations:
 
 ```bash
 alembic upgrade head
 ```
 
-Start the API:
+Create a new migration:
 
 ```bash
-uvicorn app.main:app --reload
+alembic revision --autogenerate -m "describe change"
 ```
 
-The API documentation is available through FastAPI's Swagger UI.
+## Running Tests
 
-## 📌 Project Status
+Run the complete test suite:
 
-Currently focused on completing the workflow execution engine, failure/retry handling, automated testing, and deployment.
+```bash
+python -m pytest -q
+```
 
-## 🎯 Engineering Goals
+The test suite covers core workflow execution behavior, including:
 
-This project is built to demonstrate practical backend engineering skills including:
+- Workflow execution
+- Node execution
+- Successful node execution
+- Conditional execution
+- Execution lifecycle protection
+- Workflow execution history
+- Node execution history
+- Authorization
+- Retry behavior
+- Retry success
+- Retry exhaustion
+- Failure handling
 
-* Async Python
-* REST API development
-* Database design
-* Repository/service architecture
-* Authentication and authorization
-* Background processing
-* Workflow execution
-* Failure handling and retries
-* Automated testing
-* Containerization
-* Production-oriented system design
+## Design Principles
+
+### Separation of Concerns
+
+HTTP handling, business logic, persistence, workflow execution, and external integrations are kept separate.
+
+### Repository Pattern
+
+Database operations are isolated inside repository classes.
+
+Services interact with repositories instead of embedding database access throughout the application.
+
+### Service Layer
+
+Business logic is handled by service classes.
+
+This includes workflow execution, authorization checks, execution state management, and retry handling.
+
+### Adapter Layer
+
+External node integrations are isolated behind adapters.
+
+The adapter factory selects the appropriate adapter based on the node type.
+
+### Dependency Injection
+
+FastAPI dependency injection is used for database sessions, authentication, and request-scoped dependencies.
+
+### Explicit Execution State
+
+Workflow and node execution state is persisted in the database.
+
+This allows execution history to be queried and prevents completed executions from being processed again.
+
+### Asynchronous I/O
+
+The application uses asynchronous database access and asynchronous execution components where appropriate.
+
+## Current Scope
+
+The project focuses on the backend workflow execution engine and its supporting infrastructure.
+
+The following are intentionally outside the current scope:
+
+- Frontend UI
+- Kubernetes
+- Redis
+- Celery
+- Elasticsearch
+- Microservice decomposition
+- Advanced observability infrastructure
+- Complex workflow scheduling
+
+The current implementation focuses on workflow management, graph execution, authorization, persistence, retries, testing, and containerized development.
+
+## Project Status
+
+The following components are implemented:
+
+- Authentication
+- JWT authorization
+- Workspace management
+- Workflow management
+- Workflow nodes
+- Workflow edges
+- Graph validation
+- Conditional branching
+- Workflow execution
+- Background execution
+- Retry handling
+- Node execution tracking
+- Workflow execution history
+- Node execution history
+- PostgreSQL persistence
+- SQLAlchemy async ORM
+- Alembic migrations
+- Dockerized API
+- Dockerized PostgreSQL
+- Automated tests
+
+## License
+
+This project is currently intended as a portfolio and engineering project.
